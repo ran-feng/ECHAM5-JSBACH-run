@@ -1,2 +1,25 @@
 # ECHAM5-JSBACH-run
 This is a project that organizes all the scripts to run ECHAM5-JSBACH and to postprocess the raw model output. 
+System requirement: AMD-X86_64
+Steps:
+1. creating a mh-linux-x86_64 in /echam5j-wiso.2.3/config/ based on "config requirement" included in this project.
+2. Make the following changes to the configure file:
+host_frag=""
+case "${host}" in
+    x86_64-unknown-linux-gnu)      host_frag=config/mh-linux-x86_64 ;;
+3. Run ./configure
+4. Add the following libraries to the LIB options in Makefile:
+LIB      = -L../lib -lsupport -llapack -lblas -lm -limf
+5. Make sure you have the correct flags:
+CFLAGS   = -I../config -O -DNAGf90Fortran
+FFLAGS   = -fpp -mp -w -openmp -g
+F90FLAGS = $(INCLUDES) -fpp -mp -w -openmp -g
+CPPFLAGS =
+ARFLAGS  = crv
+LDFLAGS  = -fpp -mp -w -openmp -g
+6. Run gmake
+7. Find executable in /echam5j-wiso.2.3/bin
+8. Make a run directory, copy and edit runscript, postproessing script and postprocessing toolkit
+9. Enjoy! 
+
+    
