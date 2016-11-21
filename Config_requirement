@@ -1,0 +1,26 @@
+# AMD64/EMT64/Linux
+#
+# PGI pgf95 6.1-1/OpenMPI 1.2b3, tornado@MPI/DKRZ
+#
+F90      = ifort
+#F90     = mpif90
+# -g is needed for toucan
+FFLAGS   = -fpp -mp -w -openmp -g
+F90FLAGS = -fpp -mp -w -openmp -g
+LIBS     = -L../lib -lsupport -llapack -lblas -lm -limf
+SRCDIRS  = blas lapack
+MPIROOT  = /opt/packages/openmpi/1.4.3/intel/11.0.074
+#MPIROOT = /opt/packages/openmpi/1.4.4/intel/mx
+
+ARCH       = LINUX
+
+MPI_LIB    = -lmpi_f77 -lmpi -lopen-rte -lmca_common_sm -lopen-pal
+
+NETCDFROOT = /opt/packages/netcdf/3.6.2/intel/11.0
+
+CC       = gcc
+#CC      = mpicc -E
+CFLAGS   = -O -DNAGf90Fortran
+
+DEFOPT   = -D
+MODOPT   = -I
