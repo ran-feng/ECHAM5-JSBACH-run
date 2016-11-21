@@ -1,0 +1,257 @@
+#! /bin/csh -fx
+#PBS -l nodes=1:ppn=8
+#PBS -l mem=1000mb     
+#PBS -j oe       
+#PBS -N TrHiRoLoBr_mod
+#PBS -M rfeng@umich.edu 
+################################################################################
+# Job file to run echam model on toucan 
+# ======================================
+setenv EXP TrHiRoLoBr_mod           # experiment identifier
+set RES = 63             # resolution 
+set LEV = 31             # how many levels you like
+set RERUN = .true.       # for initial run, set to .false. for restart run set to .true.
+set REMON = 7           # only has effect on restart run, specify the month you'd like to restart the model. This variable should match the month of restart file +1
+set YRST = 1991          # the year to start/restart the run
+set YRED = 2020          # the year to stop the run
+setenv YEAR 2009
+set lmlo = .false.       # whether to run with slab ocean, currently unavailable
+set lamip = .false.      # whether to run with cyclic SST, AMIP mode, transient climate run 
+#set DTIME = 720.
+#
+set MODEL = /condor/data25/rfeng/echam5j-wiso.2.3/bin/echam5.toucan        #exact location of the executable
+set UTF = /condor/data25/rfeng/echam5j-wiso.2.3/run/T${RES}    #upper level run directory where all the runs are stored
+set DAT = $UTF/Miocene.new/${EXP}                  #run directory where all the output are found
+setenv DPATH ${UTF}/Miocene.new/${EXP}/                    #path of run directory
+set DRERUN = $DAT/rerun                            #where restart file for each year are stored, in case of branching a run 
+set MPIROOT = /opt/packages/openmpi/1.4.3/intel/11.0.074
+#set MPIROOT = /opt/packages/openmpi/1.4.4/intel/mx
+set MPI_BIN = $MPIROOT/bin                         #MPI library
+#################################################################################directory of boundary dataset
+#
+set INI_ECHAM = /condor/data18/rfeng/Data_echam/T${RES}                    #initial data for atmosphere
+set INIAMIP = ${INI_ECHAM}/amip2          #initial data for sst
+set INIWISO = /condor/data18/rfeng/Data_echam/WISO/T${RES}           #initial data for water isotope
+#end of user input
+#################################################################################
+#
+set NCPUS =  8                                     #how many cpus are used in this run, equals nodesxppn
+set NPROCA = 4                             #cpus to process task A
+set NPROCB = 2                                     #cpus to process task B, which is defined by domain decompostion during parallel computing.  
+set NTHREADS = 1                                   #Only this option available, it seems unable to do a hybrid run
+set NPROMA = 92                                    #vector length during computing
+#
+#################################################################################
+#
+ setenv ECHAM5_THREADS $NTHREADS
+ setenv  OMP_NUM_THREADS $NTHREADS
+ unlimit
+ setenv KMP_MONITOR_STACKSIZE 1m
+ setenv KMP_STACKSIZE 32m
+ setenv OMP_DYNAMIC FALSE
+#
+################################################################################
+#
+if ( ! -e $DPATH ) then
+   mkdir $DPATH
+endif
+
+if ( ! -e $DAT ) then
+   mkdir $DAT
+endif
+
+if ( ! -e $DRERUN ) then
+   mkdir $DRERUN
+endif
+#################################################################################
+#
+cd $DPATH                          # output and rerun files are written into $DPATH
+#
+################################################################################
+#for initialization of the atmosphere and land surface
+rm -f unit.?? sst* ice* rrtadata *.codes atmout jsbach.nc
+#
+#############################################the following file name doesn't matter, only unit.XX matters, make sure not change the ".XX" if you want to read in certain variable sets
+#
+ln -s  ${INI_ECHAM}/T${RES}L${LEV}_jan_spec.nc          unit.23
+ln -s  ${DAT}/T${RES}_${EXP}.new.nc                 unit.24  # this directory should be changed if any change is made to use other surface boundary dataset
+#
+################################################################################
+#for initialization of land surface
+ln -s  ${INI_ECHAM}/T${RES}_O3clim2.nc    unit.21
+ln -s  ${DAT}/T${RES}_VLTCLIM_smglac.nc    unit.90
+ln -s  ${DAT}/T${RES}_VGRATCLIM_smglac.nc  unit.91
+ln -s  ${DAT}/T${RES}_TSLCLIM.nc   unit.92
+ln -s  ${INI_ECHAM}/surrta_data       rrtadata
+#
+################################################################################
+## for climatological sst and ice (LAMIP=F) use:
+if ( $lamip == .false. )then
+#ln -s  ${DAT}/T${RES}_amip2sst_clim.new.nc    unit.20
+ln -s  ${DAT}/T${RES}_amip2sst_clim.nc    unit.20
+#ln -s  ${DAT}/T${RES}_amip2sic_clim.nc    unit.96
+ln -s  ${DAT}/T${RES}_amip2sic_clim.nc    unit.96
+endif
+## for slab ocean module, currently unavailable
+if ( $lmlo == .true. )then
+ln -s  ./T${RES}_heatflux_test.nc             unit.42
+endif
+##
+################################################################################
+# for AMIP (variable) sst and ice (LAMIP=T) use:
+if ( $lamip == .true. )then
+set i = $YRST
+@ i = $i - 1
+while ($i <= $YRED)
+ln -s  ${INIAMIP}/T${RES}_amip2sst_${i}.nc  sst${i}
+ln -s  ${INIAMIP}/T${RES}_amip2sic_${i}.nc  ice${i}
+@ i++
+end
+endif
+#
+################################################################################
+#need for initialization of water isotope
+ln -s ${INIWISO}/T${RES}_wisosw_d.nc        unit.25
+if ( -e jsbach.nc) then
+#       rm jsbach.nc
+#        rm lctlib_nlct11.def
+endif
+ln -s ${DAT}/jsbach_${EXP}.new.nc   jsbach.nc
+#########################################
+# land model
+#exit
+#
+################################################################################
+#  namelist control variables and output control for grid variables
+#  spectral variables are written out by default except liq. water
+#  for production runs set LABORT=.FALSE.
+#
+#######################################################
+set namelist = namelist.echam
+###########################only need for the first time to start from months other than Jan
+if ( $RERUN == .true. ) then
+     set mon = $REMON
+else
+     set mon = 1
+endif
+###########################
+while ( $YEAR <= $YRED )
+# only run for one month
+while ( $mon < 13 )
+if ( $mon < 10 ) then
+     set MON = "0${mon}"
+else
+     set MON = "${mon}"
+endif
+
+if ( $RERUN == .true. ) then
+   set ISORERUN = T
+else
+   set ISORERUN = F
+endif
+#####################################################
+#namelist of ECHAM5-wiso
+# CO2 value equals 348: AMIP
+cat >! ${namelist} << EOF
+&RUNCTL
+  LRESUME=$RERUN,
+ out_datapath = "$DPATH"
+ out_expname  = "$EXP"
+  DT_START  = $YRST,01,01,0,0,0                 
+  DT_STOP   = $YRED,01,01,0,0,0
+  out_filetype = 2  
+  PUTDATA   = 6,'hours','last',0                             
+  TRIGJOB(1)= 1,'months','last',0                          
+  NSUB=0,                                                 
+  putrerun  = 1, 'months', 'last', 0                     
+  LAMIP=$lamip,                                         
+  LMLO=$lmlo,                                   
+  LABORT=F,                                     
+  NPROCA=${NPROCA}
+  NPROCB=${NPROCB}
+/
+&RADCTL
+  CO2VMR=574.e-6,
+/
+&WISOCTL
+  LWISO=T,
+  LWISO_RERUN=${ISORERUN},
+  NWISO=3,
+/
+&SET_STREAM_ELEMENT   name = 'az0l'    lpost  = 0   /
+&SET_STREAM_ELEMENT   name = 'slm'     lpost  = 0   /
+&SET_STREAM_ELEMENT   name = 'glac'    lpost  = 0   /
+&SET_STREAM_ELEMENT   name = 'runtoc'  lpost  = 1   /
+&SET_STREAM_ELEMENT   name = 'ao3'     lpost  = 0   /
+EOF
+# namelist_jsbach
+cat >! namelist.jsbach << EOF
+&JSBACH_CTL
+  STANDALONE = false
+  ! --- number of tiles ---
+  NTILES = 8
+
+  ! --- options to activate the different jsbach modules ---
+  USE_BETHY = .TRUE.
+  USE_PHENOLOGY = .TRUE.
+  USE_ALBEDO = .TRUE.
+  USE_DYNVEG = false
+  LCC = false
+
+  ! --- output options ---
+  FILE_TYPE = "NETCDF"
+  LPOST_ECHAM = false
+  DEBUG = .TRUE.
+/
+&ALBEDO_CTL
+  USE_ALBEDOCANOPY = .FALSE.
+/
+&CBALANCE_CTL
+  READ_CPOOLS = false
+/
+EOF
+#
+###################################################################
+#inherent ECHAM5 parallel computing environment variable, need to be the same as environmental nthreads
+setenv ECHAM5_THREADS $NTHREADS
+#mpirun -np $NCPUS --mca btl mx,sm,self $MODEL >> fort.6_${YEAR}${MON} || echo "run failed" && exit 1
+mpirun -np $NCPUS $MODEL >> fort.6_${YEAR}${MON} || echo "run failed" && exit 1
+#$MPI_BIN/mpiexec --prefix $MPIROOT -np $NCPUS $MODEL >>& fort.6_${YEAR}${MON}
+###########################################end of the model run for one year
+#
+set statenv = $status
+
+if ( $statenv != 0) then
+    exit
+endif
+
+echo "end of run, status is ${statenv}" >>& fort.6_${YEAR}${MON}
+cp rerun_${EXP}_echam ${DRERUN}/rerun_${EXP}_echam
+cp rerun_${EXP}_jsbach ${DRERUN}/rerun_${EXP}_jsbach
+cp rerun_${EXP}_veg ${DRERUN}/rerun_${EXP}_veg
+cp rerun_${EXP}_surf ${DRERUN}/rerun_${EXP}_surf
+cp rerun_${EXP}_co2 ${DRERUN}/rerun_${EXP}_co2
+cp rerun_${EXP}_js_wiso ${DRERUN}/rerun_${EXP}_js_wiso
+cp rerun_${EXP}_sf_wiso ${DRERUN}/rerun_${EXP}_sf_wiso
+set RERUN = .true.
+#switch the rerun option to do continuous run
+##########################################
+#
+@ mon = $mon + 1
+end
+#
+##########################################start postprocessing
+# variables used in subjob2
+#set YEARED = $YEAR
+#set DAY = 01
+#cp ${UTF}/subjob2 .                            #copy subjob2 to run directory and submit subjob2 to do postprocessing
+#qsub -V ./subjob2
+##########################################
+#
+@ YEAR = $YEAR + 1                      #start the run for another year
+set mon  = 1
+set REMON = 1
+#########################################end of the whole run
+end
+################################################################################
+                                                                                             
